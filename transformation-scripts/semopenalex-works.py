@@ -20,6 +20,7 @@ import sys
 import csv 
 from multiprocessing import Pool, Manager
 from functools import partial
+import shutil
 
 ###############################################
 # Logging 
@@ -239,7 +240,7 @@ has_source_predicate = URIRef("https://semopenalex.org/ontology/hasSource")
 context = URIRef("https://semopenalex.org/works/context")
 
 ##########
-CPU_THREADS = 8
+CPU_THREADS = sys.argv[0]
 ENTITY_TYPE = 'works'
 ##########
 
@@ -254,8 +255,16 @@ logging.info('works entity files started to download at: ' + data_dump_start_tim
 # Copy works entity snapshot
 client = boto3.client("s3", config=Config(signature_version=UNSIGNED))
 file_names, folders = get_file_folders(client, "openalex", "data/works/")
-download_files(client, "openalex", data_dump_input_root_dir, file_names, folders)
-logging.info('works entity files finished to download.')
+if sys.argv[1] == "yes":
+    # Remove previous downloads
+    shutil.rmtree("opt/openalex-snapshot")
+    download_files(client, "openalex", data_dump_input_root_dir, file_names, folders)
+    logging.info('works entity files finished to download.')
+else:
+    logging.info("No files downloaded. Proceeding with JSON to RDF mappings")
+
+# Clean up target directory
+shutil.rmtree("/home/paco/tools/semopenalex/graphdb-preload/graphdb-import/works")
 
 start_time = time.ctime()
 today = date.today()
