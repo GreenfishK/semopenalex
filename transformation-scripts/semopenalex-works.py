@@ -15,6 +15,31 @@ from multiprocessing import Pool
 from pathlib import Path
 from botocore import UNSIGNED
 from botocore.config import Config
+import logging
+import sys
+import csv 
+from multiprocessing import Pool, Manager
+from functools import partial
+
+###############################################
+# Logging 
+###############################################
+log_dir_path = "/home/paco/output/logs/download"
+if not os.path.exists(log_dir_path):
+    os.makedirs(log_dir_path)
+
+def setup_logging(logging_dir: str, logging_file_name: str):
+    log_file_path = f"{logging_dir}/{logging_file_name}"
+    with open(log_file_path, "w") as log_file:
+        log_file.write("")
+    logging.basicConfig(handlers=[logging.FileHandler(filename=log_file_path, 
+                                                    encoding='utf-8', mode='a+'),
+                                  logging.StreamHandler(sys.stdout)],
+                        format="%(asctime)s %(name)s:%(levelname)s:%(message)s", 
+                        datefmt="%F %A %T", 
+                        level=logging.INFO)
+
+setup_logging(logging_dir=log_dir_path, logging_file_name=f"download-oa-works.txt")
 
 
 def get_file_folders(s3_client, bucket_name, prefix=""):
@@ -214,7 +239,7 @@ has_source_predicate = URIRef("https://semopenalex.org/ontology/hasSource")
 context = URIRef("https://semopenalex.org/works/context")
 
 ##########
-CPU_THREADS = 16
+CPU_THREADS = 8
 ENTITY_TYPE = 'works'
 ##########
 
@@ -225,16 +250,16 @@ absolute_path = os.path.dirname(__file__)
 trig_output_dir_path = os.path.join(absolute_path, f'../graphdb-preload/graphdb-import/{ENTITY_TYPE}')
 
 data_dump_start_time = time.ctime()
-print('works entity files started to download at: ' + data_dump_start_time)
+logging.info('works entity files started to download at: ' + data_dump_start_time)
 # Copy works entity snapshot
 client = boto3.client("s3", config=Config(signature_version=UNSIGNED))
 file_names, folders = get_file_folders(client, "openalex", "data/works/")
-download_files(client, "openalex", data_dump_input_root_dir, file_names, folders)
-print('works entity files finished to download.')
+#download_files(client, "openalex", data_dump_input_root_dir, file_names, folders)
+logging.info('works entity files finished to download.')
 
 start_time = time.ctime()
 today = date.today()
-print(f"Overall work entity start -- {start_time}.")
+logging.info(f"Overall work entity start -- {start_time}.")
 
 # collect all .gz parts of works data dump to iterate over with multiple workers (see no. of CPU THREADS above)
 gz_file_list = []
@@ -242,7 +267,28 @@ for filename in glob.glob(os.path.join(data_dump_input_entity_dir, '*.gz')):
     gz_file_list.append(filename)
 
 
-def transform_gz_file(gz_file_path):
+def _update_status(filename, row_index, status):
+    with lock:
+        rows = []
+        with open(filename, 'r', newline='') as oa_file_status:
+            reader = csv.reader(oa_file_status)
+            for row in reader:
+                rows.append(row)
+
+        rows[row_index][2] = status
+            
+        with open(filename, 'w', newline='') as oa_file_status:
+            writer = csv.writer(oa_file_status)
+            writer.writerows(rows)
+
+
+def transform_gz_file(gz_file_path, lock):
+    file_index = gz_file_list.index(gz_file_path) + 1
+    # Log the current file being processed
+    logging.info(f'Processing file ({file_index}/{len(gz_file_list)}): {gz_file_path}')
+    
+    _update_status("/home/paco/output/tmp/oa_file_status.csv", file_index, "started")
+
     works_graph = Graph(identifier=context)
     gz_file_name = gz_file_path[len(gz_file_list[1]) - 39:].replace(".gz", "").replace("/", "_")
     file_error_count = 0
@@ -257,7 +303,7 @@ def transform_gz_file(gz_file_path):
                     json_data = json.loads(line.decode('utf-8'))
 
                 except Exception as e:
-                    print(
+                    logging.info(
                         str((e)) + f'loading did not work in line (probably empty line in dump files) in line {i}')
                     pass
 
@@ -553,7 +599,7 @@ def transform_gz_file(gz_file_path):
                             works_graph.add((work_uri, DCTERMS.created, Literal(work_created_date, datatype=XSD.date)))
 
                     except Exception as e:
-                        print(str((e)) + f' error - in file {gz_file_path} in line {i}')
+                        logging.info(str((e)) + f' error - in file {gz_file_path} in line {i}')
                         file_error_count += 1
                         pass
 
@@ -569,11 +615,11 @@ def transform_gz_file(gz_file_path):
                                 (work_uri, DCTERMS.abstract, Literal(abstract_inverted_index, datatype=XSD.string)))
 
                     except Exception as e:
-                        print(str((e)) + f' error - abstract key not found in file {gz_file_path} in line {i}')
+                        logging.info(str((e)) + f' error - abstract key not found in file {gz_file_path} in line {i}')
                         pass
 
                 if i % 50000 == 0:
-                    print(f'Processed works entity {i} lines in file {gz_file_path}')
+                    logging.info(f'Processed works entity {i} lines in file {gz_file_path}')
 
                 if i % 50000 == 0:
                     g.write(works_graph.serialize(format='trig'))
@@ -589,17 +635,33 @@ def transform_gz_file(gz_file_path):
     f.close()
     g.close()
 
-    print(f"Worker completed .trig transformation with {i} lines and {file_error_count} errors")
+    logging.info(f"Worker completed processing file ({file_index}/{len(gz_file_list)}): {gz_file_path} with {i} lines and {file_error_count} errors")
+    
+    # Write to CSV
+    _update_status("/home/paco/output/tmp/oa_file_status.csv", file_index, "transformed")
 
     # gzip file directly with command
     # -v for live output, --fast for faster compression with about 90% size reduction, -k for keeping the original .trig file
-    os.system(f'gzip --fast {trig_output_dir_path}/{gz_file_name}.trig')
-    print("Worker completed gzip")
+    #os.system(f'gzip --fast {trig_output_dir_path}/{gz_file_name}.trig')
+    #logging.info("Worker completed gzip")
 
 
 if __name__ == '__main__':
+    logging.info(f"Number of zipped files to be processed: {len(gz_file_list)}")
+
+    # Initialize CSV file with headers
+    with open("/home/paco/output/tmp/oa_file_status.csv", "w", newline='') as oa_file_status:
+        csv_writer = csv.writer(oa_file_status)
+        csv_writer.writerow(["index", "file_name", "status"])
+        for i, gz_file_path in enumerate(gz_file_list, start=1):
+            csv_writer.writerow([i, gz_file_path, "not_started"])
+    
+    manager = Manager()
+    lock = manager.Lock()
+
+    partial_transform_gz_file = partial(transform_gz_file, lock=lock)
     pool = Pool(CPU_THREADS, maxtasksperchild=5)
-    pool.map(transform_gz_file, gz_file_list)
+    pool.map(partial_transform_gz_file, gz_file_list)
     pool.close()
 
 end_time = time.ctime()
@@ -610,5 +672,5 @@ with open(f"{trig_output_dir_path}/{ENTITY_TYPE}-transformation-summary.txt", "w
     z.write('End Time: {} .\n'.format(end_time))
     z.close()
 
-print("Done")
-print("#############################")
+logging.info("Done")
+logging.info("#############################")
