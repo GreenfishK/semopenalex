@@ -251,13 +251,13 @@ absolute_path = os.path.dirname(__file__)
 trig_output_dir_path = os.path.join(absolute_path, f'../graphdb-preload/graphdb-import/{ENTITY_TYPE}')
 
 data_dump_start_time = time.ctime()
-logging.info('works entity files started to download at: ' + data_dump_start_time)
 # Copy works entity snapshot
 client = boto3.client("s3", config=Config(signature_version=UNSIGNED))
 file_names, folders = get_file_folders(client, "openalex", "data/works/")
 if sys.argv[2] == "yes":
+    logging.info('works entity files started to download at: ' + data_dump_start_time)
     # Remove previous downloads
-    shutil.rmtree("opt/openalex-snapshot")
+    shutil.rmtree("/opt/openalex-snapshot")
     download_files(client, "openalex", data_dump_input_root_dir, file_names, folders)
     logging.info('works entity files finished to download.')
 else:
