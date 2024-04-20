@@ -240,7 +240,7 @@ has_source_predicate = URIRef("https://semopenalex.org/ontology/hasSource")
 context = URIRef("https://semopenalex.org/works/context")
 
 ##########
-CPU_THREADS = sys.argv[0]
+CPU_THREADS = sys.argv[1]
 ENTITY_TYPE = 'works'
 ##########
 
@@ -255,7 +255,7 @@ logging.info('works entity files started to download at: ' + data_dump_start_tim
 # Copy works entity snapshot
 client = boto3.client("s3", config=Config(signature_version=UNSIGNED))
 file_names, folders = get_file_folders(client, "openalex", "data/works/")
-if sys.argv[1] == "yes":
+if sys.argv[2] == "yes":
     # Remove previous downloads
     shutil.rmtree("opt/openalex-snapshot")
     download_files(client, "openalex", data_dump_input_root_dir, file_names, folders)
