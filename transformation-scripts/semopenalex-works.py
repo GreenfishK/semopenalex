@@ -244,9 +244,10 @@ CPU_THREADS = sys.argv[1]
 ENTITY_TYPE = 'works'
 ##########
 
+# Paths
 data_dump_input_root_dir = '/opt/openalex-snapshot'
 data_dump_input_entity_dir = f'{data_dump_input_root_dir}/data/{ENTITY_TYPE}/*'
-
+status_file = "/home/paco/output/tmp/oa_file_status.csv"
 absolute_path = os.path.dirname(__file__)
 trig_output_dir_path = os.path.join(absolute_path, f'../graphdb-preload/graphdb-import/{ENTITY_TYPE}')
 
@@ -263,8 +264,12 @@ if sys.argv[2] == "yes":
 else:
     logging.info("No files downloaded. Proceeding with JSON to RDF mappings")
 
-# Clean up target directory
-shutil.rmtree("/home/paco/tools/semopenalex/graphdb-preload/graphdb-import/works")
+# Clean up output directory
+if not os.path.exists(status_file):
+    logging.info(f"Cleaning output director: {trig_output_dir_path}")
+    shutil.rmtree(trig_output_dir_path)
+else:
+    logging.info(f"A status file exists at {status_file}. Continuing with transforming untransformed input files.")
 
 start_time = time.ctime()
 today = date.today()
@@ -274,6 +279,16 @@ logging.info(f"Overall work entity start -- {start_time}.")
 gz_file_list = []
 for filename in glob.glob(os.path.join(data_dump_input_entity_dir, '*.gz')):
     gz_file_list.append(filename)
+
+
+def _check_status(filename, row_index):
+    with lock:
+        with open(filename, 'r', newline='') as oa_file_status:
+            reader = csv.reader(oa_file_status)
+            for i, row in enumerate(reader, start=1):
+                if i == row_index:
+                    return row[2]  # Assuming status is in the third column (index 2)
+    return None  # Return None if row_index is out of range or if status is not found
 
 
 def _update_status(filename, row_index, status):
@@ -296,7 +311,12 @@ def transform_gz_file(gz_file_path, lock):
     # Log the current file being processed
     logging.info(f'Processing file ({file_index}/{len(gz_file_list)}): {gz_file_path}')
     
-    _update_status("/home/paco/output/tmp/oa_file_status.csv", file_index, "started")
+    status = _check_status(status_file, file_index) 
+    if status != "not_started":
+        logging.info(f"File ({file_index}/{len(gz_file_list)}): {gz_file_path} has the status: {status} and will be skipped.")
+        return
+    
+    _update_status(status_file, file_index, "started")
 
     works_graph = Graph(identifier=context)
     gz_file_name = gz_file_path[len(gz_file_list[1]) - 39:].replace(".gz", "").replace("/", "_")
@@ -647,7 +667,7 @@ def transform_gz_file(gz_file_path, lock):
     logging.info(f"Worker completed processing file ({file_index}/{len(gz_file_list)}): {gz_file_path} with {i} lines and {file_error_count} errors")
     
     # Write to CSV
-    _update_status("/home/paco/output/tmp/oa_file_status.csv", file_index, "transformed")
+    _update_status(status_file, file_index, "transformed")
 
     # gzip file directly with command
     # -v for live output, --fast for faster compression with about 90% size reduction, -k for keeping the original .trig file
@@ -659,7 +679,7 @@ if __name__ == '__main__':
     logging.info(f"Number of zipped files to be processed: {len(gz_file_list)}")
 
     # Initialize CSV file with headers
-    with open("/home/paco/output/tmp/oa_file_status.csv", "w", newline='') as oa_file_status:
+    with open(status_file, "w", newline='') as oa_file_status:
         csv_writer = csv.writer(oa_file_status)
         csv_writer.writerow(["index", "file_name", "status"])
         for i, gz_file_path in enumerate(gz_file_list, start=1):
@@ -680,6 +700,9 @@ with open(f"{trig_output_dir_path}/{ENTITY_TYPE}-transformation-summary.txt", "w
     z.write('Files processed: {} .\n'.format(len(gz_file_list)))
     z.write('End Time: {} .\n'.format(end_time))
     z.close()
+
+    # Remove status file
+    os.remove(status_file)
 
 logging.info("Done")
 logging.info("#############################")
