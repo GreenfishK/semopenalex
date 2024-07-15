@@ -25,7 +25,7 @@ import shutil
 ###############################################
 # Logging 
 ###############################################
-log_dir_path = "/home/paco/output/logs/download"
+log_dir_path = "/home/skg/output/logs/download"
 if not os.path.exists(log_dir_path):
     os.makedirs(log_dir_path)
 
@@ -247,7 +247,7 @@ ENTITY_TYPE = 'works'
 # Paths
 data_dump_input_root_dir = '/opt/openalex-snapshot'
 data_dump_input_entity_dir = f'{data_dump_input_root_dir}/data/{ENTITY_TYPE}/*'
-status_file = "/home/paco/output/tmp/oa_file_status.csv"
+status_file = "/home/skg/output/tmp/oa_file_status.csv"
 absolute_path = os.path.dirname(__file__)
 trig_output_dir_path = os.path.join(absolute_path, f'../graphdb-preload/graphdb-import/{ENTITY_TYPE}')
 
